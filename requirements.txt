@@ -1,0 +1,4 @@
+fastapi==0.143.0
+nicegui==3.18.0
+httpx==0.28.1
+httpx2==2.13.1
