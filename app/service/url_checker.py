@@ -1,9 +1,11 @@
 # dataclass: a simple way to store related values in one object
 # HTTPStatus: turns 404 into the text "Not Found"
+# time.perf_counter: precise stopwatch for measuring duration
 # urlparse: splits a URL into parts (scheme, host, path, …)
 # httpx: makes HTTP requests (e.g. GET to a URL)
 from dataclasses import dataclass
 from http import HTTPStatus
+import time
 from urllib.parse import urlparse
 
 import httpx
@@ -180,6 +182,9 @@ async def check_url(url: str) -> CheckResult:
         return prepared
     url = prepared
 
+    # Start our own stopwatch (also works when the request fails)
+    started = time.perf_counter()
+
     try:
         # AsyncClient: HTTP client for async code
         # follow_redirects: follow e.g. http → https
@@ -188,10 +193,11 @@ async def check_url(url: str) -> CheckResult:
             # await: wait for the server response
             response = await client.get(url)
 
+        # How many milliseconds since "started"?
+        response_time_ms = (time.perf_counter() - started) * 1000
+
         status_code = response.status_code
         status_text = _status_text(status_code)
-        # httpx measures how long the request took
-        response_time_ms = response.elapsed.total_seconds() * 1000
         # After redirects, response.url may differ from the URL we typed
         final_url = str(response.url)
 
@@ -219,6 +225,8 @@ async def check_url(url: str) -> CheckResult:
         )
     except httpx.RequestError as e:
         # e.g. DNS failure, timeout, no connection — no HTTP status at all
+        # Still record how long we waited before giving up
+        response_time_ms = (time.perf_counter() - started) * 1000
         return CheckResult(
             url=url,
             reachable=False,
@@ -229,5 +237,7 @@ async def check_url(url: str) -> CheckResult:
                 reachable=False,
                 healthy=False,
                 explanation=f"Could not reach the server: {e}",
+                response_time_ms=response_time_ms,
             ),
+            response_time_ms=response_time_ms,
         )
