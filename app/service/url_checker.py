@@ -1,6 +1,9 @@
 # dataclass: a simple way to store related values in one object
+# urlparse: splits a URL into parts (scheme, host, path, …)
 # httpx: makes HTTP requests (e.g. GET to a URL)
 from dataclasses import dataclass
+from urllib.parse import urlparse
+
 import httpx
 
 
@@ -14,8 +17,13 @@ class CheckResult:
     status_code: int | None = None
 
 
-# async = function can wait for the network without blocking the caller
-async def check_url(url: str) -> CheckResult:
+def normalize_and_validate_url(url: str) -> str | CheckResult:
+    """Prepare the URL before we check it.
+
+    Returns:
+      - a string = the cleaned URL is ready to request
+      - a CheckResult = something is wrong; stop and show that message
+    """
     # .strip() removes leading/trailing whitespace
     url = url.strip()
     if not url:
@@ -25,6 +33,33 @@ async def check_url(url: str) -> CheckResult:
             ok=False,
             message="Please enter a URL",
         )
+
+    # Users often type "example.com" without http/https — add https:// for them
+    if "://" not in url:
+        url = "https://" + url
+
+    # Break the URL into parts so we can check scheme and host
+    # Example: https://example.com/path → scheme="https", netloc="example.com"
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return CheckResult(
+            url=url,
+            ok=False,
+            message="Please enter a valid http(s) URL",
+        )
+
+    # All good — return the normalized URL string
+    return url
+
+
+# async = function can wait for the network without blocking the caller
+async def check_url(url: str) -> CheckResult:
+    # First: clean + validate (no network yet)
+    prepared = normalize_and_validate_url(url)
+    # isinstance: "is prepared a CheckResult?" → validation already failed
+    if isinstance(prepared, CheckResult):
+        return prepared
+    url = prepared
 
     try:
         # AsyncClient: HTTP client for async code
