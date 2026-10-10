@@ -1,9 +1,11 @@
 # dataclass: a simple way to store related values in one object
+# Enum: a fixed list of allowed values (typos like "healty" are rejected)
 # HTTPStatus: turns 404 into the text "Not Found"
 # time.perf_counter: precise stopwatch for measuring duration
 # urlparse: splits a URL into parts (scheme, host, path, …)
 # httpx: makes HTTP requests (e.g. GET to a URL)
 from dataclasses import dataclass
+from enum import Enum
 from http import HTTPStatus
 import time
 from urllib.parse import urlparse
@@ -11,20 +13,28 @@ from urllib.parse import urlparse
 import httpx
 
 
+# The only categories a check can have.
+# UI and service both use these names, so a typo is a Python error instead of a silent bug.
+class CheckCategory(Enum):
+    INVALID_INPUT = "invalid_input"  # empty or not a real http(s) URL
+    UNREACHABLE = "unreachable"  # timeout, DNS, no connection
+    HEALTHY = "healthy"  # 2xx — site works as expected
+    CLIENT_ERROR = "client_error"  # 4xx — server answered, page/request failed
+    SERVER_ERROR = "server_error"  # 5xx — server answered with an internal error
+    UNEXPECTED = "unexpected"  # some other status code
+
+
 # Holds the result of one URL check (no UI here — only data)
 #
 # Two different ideas (important for monitoring):
 #   reachable = the server answered at all (any HTTP status, even 404 or 500)
 #   healthy   = the site works as expected (status 2xx, e.g. 200 OK)
-#
-# category helps the UI pick a color / summary:
-#   invalid_input | unreachable | healthy | client_error | server_error | unexpected
 @dataclass
 class CheckResult:
     url: str
     reachable: bool
     healthy: bool
-    category: str
+    category: CheckCategory
     message: str
     # Optional details — None when we never got a real HTTP response
     status_code: int | None = None
@@ -42,7 +52,7 @@ def _status_text(status_code: int) -> str:
         return "Unknown"
 
 
-def _explain_status(status_code: int) -> tuple[bool, bool, str, str]:
+def _explain_status(status_code: int) -> tuple[bool, bool, CheckCategory, str]:
     """Turn a status code into reachable/healthy/category/short explanation.
 
     Returns: (reachable, healthy, category, explanation)
@@ -54,7 +64,7 @@ def _explain_status(status_code: int) -> tuple[bool, bool, str, str]:
         return (
             reachable,
             True,
-            "healthy",
+            CheckCategory.HEALTHY,
             "Site works as expected (success response).",
         )
     if 300 <= status_code < 400:
@@ -62,28 +72,28 @@ def _explain_status(status_code: int) -> tuple[bool, bool, str, str]:
         return (
             reachable,
             False,
-            "unexpected",
+            CheckCategory.UNEXPECTED,
             "Got a redirect status even though redirects are followed.",
         )
     if 400 <= status_code < 500:
         return (
             reachable,
             False,
-            "client_error",
+            CheckCategory.CLIENT_ERROR,
             "Server is reachable, but the page/request failed (e.g. 404 Not Found).",
         )
     if 500 <= status_code < 600:
         return (
             reachable,
             False,
-            "server_error",
+            CheckCategory.SERVER_ERROR,
             "Server is reachable, but it reported an internal error.",
         )
 
     return (
         reachable,
         False,
-        "unexpected",
+        CheckCategory.UNEXPECTED,
         "Got an unusual HTTP status code.",
     )
 
@@ -139,7 +149,7 @@ def normalize_and_validate_url(url: str) -> str | CheckResult:
             url="",
             reachable=False,
             healthy=False,
-            category="invalid_input",
+            category=CheckCategory.INVALID_INPUT,
             message=_format_details(
                 url="",
                 reachable=False,
@@ -160,7 +170,7 @@ def normalize_and_validate_url(url: str) -> str | CheckResult:
             url=url,
             reachable=False,
             healthy=False,
-            category="invalid_input",
+            category=CheckCategory.INVALID_INPUT,
             message=_format_details(
                 url=url,
                 reachable=False,
@@ -231,7 +241,7 @@ async def check_url(url: str) -> CheckResult:
             url=url,
             reachable=False,
             healthy=False,
-            category="unreachable",
+            category=CheckCategory.UNREACHABLE,
             message=_format_details(
                 url=url,
                 reachable=False,
